@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>UNM CS 412/512 HW4</title>
+  <style>
+    body { background: #111;
+     color: #ccc; 
+     font-family: monospace;
+     display: flex;
+     flex-direction: column;
+     align-items: center;
+     text-align: center;
+
+    }
+    canvas { 
+        border: 1px solid #444; 
+    }
+  </style>
+</head>
+<body>
+  <h2>Hierarchical Robotic Arm</h2>
+  <p>Use the sliders below to control the arm's base, elbow, and hand.</p>
+
+  <canvas id="glcanvas" width="500" height="500"></canvas>
+  <div>Base spin: <span id="baseVal">0.00</span><br>
+    <input type="range" id="baseSlider" min="0" max="6.28" step="0.05" value="0"></div>
+  <div>Elbow bend: <span id="elbowVal">0.00</span><br>
+    <input type="range" id="elbowSlider" min="-2.2" max="2.2" step="0.05" value="0"></div>
+  <div>Hand bend: <span id="handVal">0.00</span><br>
+    <input type="range" id="handSlider" min="-2.5" max="2.5" step="0.05" value="0"></div>
+  <div>Claw open: <span id="clawVal">0.30</span><br>
+    <input type="range" id="clawSlider" min="-0.3" max="0.9" step="0.05" value="0.3"></div>
+  <div><button id="demoButton">Start Demo</button></div>
+
+  <script src="primitives.js"></script>
+  <script src="transformations.js"></script>
+
+  <script>
+    const vertexShaderSource = `#version 300 es
+in vec3 aPosition;
+in vec3 aColor;
+uniform mat4 uModelViewMatrix;
+uniform mat4 uProjectionMatrix;
+uniform mat4 uModelTransformationMatrix;
+out vec3 vColor;
+void main() {
+  gl_Position = uProjectionMatrix * uModelViewMatrix * uModelTransformationMatrix * vec4(aPosition,1.0);
+  vColor = aColor;
+}
+`;
+
+    const fragmentShaderSource = `#version 300 es
+precision mediump float;
+in vec3 vColor;
+out vec4 fragColor;
+void main() {
+  fragColor = vec4(vColor,1.0);
+}
+`;
+
+    // Create vertex and fragment shaders for GPU
+    function createShader(gl, type, source) {
+        let shader = gl.createShader(type);
+        gl.shaderSource(shader, source);
+        gl.compileShader(shader);
+        if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+            throw new Error(gl.getShaderInfoLog(shader));
+        }
+        return shader;
+    }
+    // Link the vertex and fragment shaders into one GPU program
+    function createProgram(gl, vsSource, fsSource) {
+        let vs = createShader(gl, gl.VERTEX_SHADER, vsSource);
+        let fs = createShader(gl, gl.FRAGMENT_SHADER, fsSource);
+        let prog = gl.createProgram();
+        
+        gl.attachShader(prog, vs);
+        gl.attachShader(prog, fs);
+        gl.linkProgram(prog);
+        if(!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+            throw new Error(gl.getProgramInfoLog(prog));
+        }
+        return prog;
+    }
+
+    const canvas = document.getElementById("glcanvas");
+    const gl = canvas.getContext("webgl2");
+    if(!gl) alert("Webgl2 not supported");
+
+    // Compile both shaders, link them, and make this the active program
+    let program = createProgram(gl, vertexShaderSource, fragmentShaderSource);
+    gl.useProgram(program);
+
+    // Shader input 
+    let posLoc = gl.getAttribLocation(program, "aPosition");
+    let colorLoc = gl.getAttribLocation(program, "aColor");
+    let uMVM = gl.getUniformLocation(program, "uModelViewMatrix");
+    let uPM = gl.getUniformLocation(program, "uProjectionMatrix");
+    let uMTM = gl.getUniformLocation(program, "uModelTransformationMatrix");
+
+
+    const sphereData = generateSphere(1.0, 20, 20);
+    const cylinderData = generateCylinder(1.0, 1.0, 20);
+
+    // Buffers
+    let vbo, nbo, ibo;
+    let sphereVbo, sphereNbo, sphereIbo;
+    let cylinderVbo, cylinderNbo, cylinderIbo;
+
+    // copy each shapes data from js memory into GPU memory 
+    function initBuffers() {
+        vbo = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+        gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
+
+        nbo = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, nbo);
+        gl.bufferData(gl.ARRAY_BUFFER, colors, gl.STATIC_DRAW);
+
+        ibo = gl.createBuffer();
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibo);
+        gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
+
+        sphereVbo = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, sphereVbo);
+        gl.bufferData(gl.ARRAY_BUFFER, sphereData.positions, gl.STATIC_DRAW);
+
+        sphereNbo = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, sphereNbo);
+        gl.bufferData(gl.ARRAY_BUFFER, sphereData.colors, gl.STATIC_DRAW);
+
+        sphereIbo = gl.createBuffer();
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, sphereIbo);
+        gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, sphereData.indices, gl.STATIC_DRAW);
+
+        cylinderVbo = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, cylinderVbo);
+        gl.bufferData(gl.ARRAY_BUFFER, cylinderData.positions, gl.STATIC_DRAW);
+
+        cylinderNbo = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, cylinderNbo);
+        gl.bufferData(gl.ARRAY_BUFFER, cylinderData.colors, gl.STATIC_DRAW);
+
+        cylinderIbo = gl.createBuffer();
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, cylinderIbo);
+        gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, cylinderData.indices, gl.STATIC_DRAW);
+    }
+    initBuffers();
+
+    // Perspective lens: 45 degree field of view, sees from 0.1 to 100 units away
+    let fov = Math.PI / 4, aspect = canvas.width / canvas.height, zNear = 0.1, zFar = 100;
+    let proj = perspective(fov, aspect, zNear, zFar);
+
+    // Camera position, changed by the keyboardi 
+    let camX = 0, camY = -2, camZ = -12;
+
+    document.addEventListener('keydown', e => {
+      const step = 0.2;
+      switch (e.key) {
+        case 'ArrowUp': camY -= step; break;
+        case 'ArrowDown': camY += step; break;
+        case 'ArrowLeft': camX += step; break;
+        case 'ArrowRight': camX -= step; break;
+        case 'w': camZ += step; break;
+        case 's': camZ -= step; break;
+      }
+    });
+
+    // Draw one shape: send its matrix, point the shader at its buffers, then draw
+    function drawObject(posBuf, colBuf, idxBuf, count, matrix) {
+      gl.uniformMatrix4fv(uMTM, false, matrix);
+
+      gl.bindBuffer(gl.ARRAY_BUFFER, posBuf);
+      gl.enableVertexAttribArray(posLoc);
+      gl.vertexAttribPointer(posLoc, 3, gl.FLOAT, false, 0, 0);
+
+      gl.bindBuffer(gl.ARRAY_BUFFER, colBuf);
+      gl.enableVertexAttribArray(colorLoc);
+      gl.vertexAttribPointer(colorLoc, 3, gl.FLOAT, false, 0, 0);
+
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, idxBuf);
+      gl.drawElements(gl.TRIANGLES, count, gl.UNSIGNED_SHORT, 0);
+    }
+
+    let baseRot = 0, elbowRot = 0, handRot = 0, clawOpen = 0.3;
+    const LOWER = 1.6; 
+    const FOREARM = 2.7;
+    // Connect a slider to a variable and keep its label in sync
+    function hookSlider(sliderId, labelId, onChange) {
+      document.getElementById(sliderId).addEventListener('input', e => {
+        const v = parseFloat(e.target.value);
+        document.getElementById(labelId).textContent = v.toFixed(2);
+        onChange(v);
+      });
+    }
+    hookSlider('baseSlider', 'baseVal', v => baseRot = v);
+    hookSlider('elbowSlider', 'elbowVal', v => elbowRot = v);
+    hookSlider('handSlider', 'handVal', v => handRot = v);
+    hookSlider('clawSlider', 'clawVal', v => clawOpen = v);
+
+    // Demo mode
+    let demoOn = false, demoStart = 0;
+    document.getElementById('demoButton').addEventListener('click', () => {
+      demoOn = !demoOn;
+      demoStart = Date.now();
+      document.getElementById('demoButton').textContent = demoOn ? 'Stop Demo' : 'Start Demo';
+
+      if (!demoOn) {
+        // hand control back to sliders at their current positions 
+        baseRot = parseFloat(document.getElementById('baseSlider').value);
+        elbowRot = parseFloat(document.getElementById('elbowSlider').value);
+        handRot = parseFloat(document.getElementById('handSlider').value);
+        clawOpen = parseFloat(document.getElementById('clawSlider').value);
+      }
+    
+    });
+
+    function render() {
+        gl.enable(gl.DEPTH_TEST);
+        gl.clearColor(0, 0, 0, 1);
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+        // Camera and lens matrices that are shared by every shape
+        let modelViewMatrix = mat4Translate(mat4Identity(), [camX, camY, camZ]);
+        gl.uniformMatrix4fv(uPM, false, proj);
+        gl.uniformMatrix4fv(uMVM, false, modelViewMatrix);
+
+        if(demoOn) {
+          const t = (Date.now() - demoStart) / 1000;  
+          const s = 0.5 - 0.5 * Math.cos(t * 1.2); // smooth 0 to 1 and back
+          baseRot = 1.57 + 0.7 * Math.sin(t * 0.6); // slow sideways sweep
+          elbowRot = 2.20 * s; // reach down 
+          handRot = 0.85 * s; // tilt the claw down with it
+          clawOpen = 0.6 - 0.95 * s; // open while up, closed at the bottom 
+        }
+
+        // Level 1: base (cube squashed flat), spins around Y
+        let baseFrame = mat4RotateY(mat4Identity(), baseRot);
+        let baseDraw = multiplyMat4(baseFrame, mat4Scale(1.2, 0.3, 1.2));
+        drawObject(vbo, nbo, ibo, indices.length, baseDraw);
+
+        // Level 2: lower arm (cylinder), sits on top of the base
+        let shoulder = mat4Translate(baseFrame, [0, 0.3, 0]);
+        let lowerDraw = multiplyMat4(mat4Translate(shoulder, [0, LOWER / 2, 0]), mat4Scale(0.25, LOWER, 0.25));
+        drawObject(cylinderVbo, cylinderNbo, cylinderIbo, cylinderData.indices.length, lowerDraw);
+
+        // Level 3: elbow (sphere) at the end of the lower arm, bends around X
+        let elbowFrame = mat4Translate(shoulder, [0, LOWER, 0]);
+        elbowFrame = mat4RotateX(elbowFrame, elbowRot);
+        let elbowDraw = multiplyMat4(elbowFrame, mat4Scale(0.35, 0.35, 0.35));
+        drawObject(sphereVbo, sphereNbo, sphereIbo, sphereData.indices.length, elbowDraw);
+
+        // Level 4: forearm (cylinder), hangs off the elbow's frame
+        let forearmDraw = multiplyMat4(mat4Translate(elbowFrame, [0, FOREARM / 2, 0]), mat4Scale(0.2, FOREARM, 0.2));
+        drawObject(cylinderVbo, cylinderNbo, cylinderIbo, cylinderData.indices.length, forearmDraw);
+
+        // Level 5: hand (sphere) at the end of the forearm, bends around X
+        let wristFrame = mat4Translate(elbowFrame, [0, FOREARM, 0]);
+        wristFrame = mat4RotateX(wristFrame, handRot);
+        let handDraw = multiplyMat4(wristFrame, mat4Scale(0.3, 0.3, 0.3));
+        drawObject(sphereVbo, sphereNbo, sphereIbo, sphereData.indices.length, handDraw);
+
+        // Level 6: three claw fingers (cylinders) around the hand
+        for (let i = 0; i < 3; i++) {
+        // spin to this finger's spot (0, 120, 240 degrees), step out from center, then tilt
+        let fingerFrame = mat4RotateY(wristFrame, i * 2 * Math.PI / 3);
+        fingerFrame = mat4Translate(fingerFrame, [0, 0.15, 0.25]);
+        fingerFrame = mat4RotateX(fingerFrame, clawOpen);
+
+        // cylinder is centered on its origin, so lift it by half its length to sit on the joint
+        let fingerDraw = multiplyMat4(mat4Translate(fingerFrame, [0, 0.3, 0]), mat4Scale(0.07, 0.6, 0.07));
+        drawObject(cylinderVbo, cylinderNbo, cylinderIbo, cylinderData.indices.length, fingerDraw);
+
+        }
+        requestAnimationFrame(render);
+    }
+    requestAnimationFrame(render);
+
+   
+    
+
+  </script>
+</body>
+</html>

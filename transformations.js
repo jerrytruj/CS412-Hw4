@@ -133,7 +133,7 @@ function mat4RotateY(matrix, angle) {
     return result;
 }
 
-// Matrix scaling (builds a fresh scale matrix, does not modify an existing one)
+// matrix scaling 
 function mat4Scale(sx, sy, sz) {
     return new Float32Array([
         sx, 0,  0,  0,
